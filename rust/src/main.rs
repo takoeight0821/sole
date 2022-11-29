@@ -1,17 +1,14 @@
-use std::io::{self, Write};
+mod reader;
 
+use reader::{read, Spanned, Token};
 use rustyline::{error::ReadlineError, Editor};
 
-fn read(source: String) -> String {
-    source
-}
-
-fn eval(expr: String) -> String {
+fn eval(expr: Vec<Spanned<Token>>) -> Vec<Spanned<Token>> {
     expr
 }
 
-fn print(value: String) -> String {
-    value
+fn print(value: Vec<Spanned<Token>>) -> String {
+    format!("{:?}", value)
 }
 
 fn rep(source: String) -> String {
