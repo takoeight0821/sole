@@ -1,23 +1,30 @@
-use chumsky::{prelude::*, text::Character, Error};
+use chumsky::{prelude::*, text::Character, Error, Stream};
 
-pub fn read(source: String) -> Vec<Spanned<Token>> {
-    lexer().parse(source).unwrap()
-}
+use crate::types::{Form, FormKind, Spanned, Token};
 
-pub type Span = std::ops::Range<usize>;
-pub type Spanned<T> = (T, Span);
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Token {
-    Int(String),
-    String(String),
-    Ident(String),
-    Ctrl(char),
+pub fn read(source: &str) -> Result<Form, Vec<Simple<String>>> {
+    match lexer().parse(source) {
+        Ok(tokens) => {
+            let len = source.chars().count();
+            form_parser()
+                .parse(Stream::from_iter(len..len + 1, tokens.into_iter()))
+                .map_err(|parse_errs| {
+                    parse_errs
+                        .into_iter()
+                        .map(|e| e.map(|tok| tok.to_string()))
+                        .collect::<Vec<_>>()
+                })
+        }
+        Err(lex_errs) => Err(lex_errs
+            .into_iter()
+            .map(|e| e.map(|c| c.to_string()))
+            .collect()),
+    }
 }
 
 const CTRL_CHARS: &str = "[]{}()'`~^@";
 
-pub fn ident<C: Character, E: Error<C>>() -> impl Parser<C, C::Collection, Error = E> + Copy + Clone
+pub fn symbol<C: Character, E: Error<C>>() -> impl Parser<C, C::Collection, Error = E> + Copy + Clone
 {
     filter(|c: &C| !(CTRL_CHARS.contains(c.to_char())) && !c.is_whitespace())
         .repeated()
@@ -36,12 +43,12 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<Token>>, Error = Simple<char>> {
 
     let ctrl = one_of(CTRL_CHARS).map(Token::Ctrl);
 
-    let ident = ident().map(Token::Ident);
+    let symbol = symbol().map(Token::Symbol);
 
     let token = int
         .or(str_)
         .or(ctrl)
-        .or(ident)
+        .or(symbol)
         .recover_with(skip_then_retry_until([]));
 
     let comment = just(";").then(take_until(just('\n'))).padded();
@@ -51,4 +58,15 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<Token>>, Error = Simple<char>> {
         .padded_by(comment.repeated())
         .padded()
         .repeated()
+}
+
+pub fn form_parser() -> impl Parser<Token, Form, Error = Simple<Token>> + Clone {
+    let raw_atom = select! {
+        Token::Symbol(x) => FormKind::Symbol(x),
+        Token::Int(x) => FormKind::Int(x.parse().unwrap()),
+        Token::String(x) => FormKind::String(x),
+    }
+    .labelled("atom");
+    let atom = raw_atom.map_with_span(|kind, span| (kind, span));
+    atom
 }
