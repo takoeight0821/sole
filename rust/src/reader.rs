@@ -7,6 +7,7 @@ pub fn read(source: &str) -> Result<Form, Vec<Simple<String>>> {
         Ok(tokens) => {
             let len = source.chars().count();
             form_parser()
+                .then_ignore(end())
                 .parse(Stream::from_iter(len..len + 1, tokens.into_iter()))
                 .map_err(|parse_errs| {
                     parse_errs
@@ -58,15 +59,24 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<Token>>, Error = Simple<char>> {
         .padded_by(comment.repeated())
         .padded()
         .repeated()
+        .then_ignore(end())
 }
 
 pub fn form_parser() -> impl Parser<Token, Form, Error = Simple<Token>> + Clone {
-    let raw_atom = select! {
-        Token::Symbol(x) => FormKind::Symbol(x),
-        Token::Int(x) => FormKind::Int(x.parse().unwrap()),
-        Token::String(x) => FormKind::String(x),
-    }
-    .labelled("atom");
-    let atom = raw_atom.map_with_span(|kind, span| (kind, span));
-    atom
+    recursive(|form| {
+        let atom = select! {
+            Token::Symbol(x) => FormKind::Symbol(x),
+            Token::Int(x) => FormKind::Int(x.parse().unwrap()),
+            Token::String(x) => FormKind::String(x),
+        }
+        .labelled("atom")
+        .map_with_span(|kind, span| (kind, span));
+        let list = form
+            .repeated()
+            .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')))
+            .map(FormKind::List)
+            .labelled("list")
+            .map_with_span(|kind, span| (kind, span));
+        atom.or(list)
+    })
 }
